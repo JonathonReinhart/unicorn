@@ -7,7 +7,7 @@ from . import arm_const, arm64_const, mips_const, sparc_const, m68k_const, x86_c
 from unicorn_const import *
 
 import ctypes, ctypes.util, sys
-from os.path import split, join, dirname
+import os.path
 import distutils.sysconfig
 
 
@@ -15,44 +15,35 @@ import inspect
 if not hasattr(sys.modules[__name__], '__file__'):
     __file__ = inspect.getfile(inspect.currentframe())
 
-_lib_path = split(__file__)[0]
-_all_libs = ['unicorn.dll', 'libunicorn.so', 'libunicorn.dylib']
-_found = False
 
-for _lib in _all_libs:
-    try:
-        _lib_file = join(_lib_path, _lib)
-        # print "Trying to load:", _lib_file
-        _uc = ctypes.cdll.LoadLibrary(_lib_file)
-        _found = True
-        break
-    except OSError:
-        pass
+def load_unicorn():
+    # Try to load Unicorn from these paths, in order:
+    paths = (
+        # Same directory as this file
+        os.path.dirname(__file__),
 
-if _found == False:
-    # try loading from default paths
-    for _lib in _all_libs:
-        try:
-            _uc = ctypes.cdll.LoadLibrary(_lib)
-            _found = True
-            break
-        except OSError:
-            pass
+        # Default paths
+        None,
 
-if _found == False:
-    # last try: loading from python lib directory
-    _lib_path = distutils.sysconfig.get_python_lib()
-    for _lib in _all_libs:
-        try:
-            _lib_file = join(_lib_path, 'unicorn', _lib)
-            # print "Trying to load:", _lib_file
-            _uc = ctypes.cdll.LoadLibrary(_lib_file)
-            _found = True
-            break
-        except OSError:
-            pass
-    if _found == False:
-        raise ImportError("ERROR: fail to load the dynamic library.")
+        # Python library diretory
+        os.path.join(distutils.sysconfig.get_python_lib(), 'unicorn'),
+    )
+
+    libnames = ('unicorn.dll', 'libunicorn.so', 'libunicorn.dylib')
+
+    for path in paths:
+        for lib in libnames:
+            if path:
+                lib = os.path.join(path, lib)
+            try:
+                #print "Trying to load:", lib
+                return ctypes.cdll.LoadLibrary(lib)
+            except OSError:
+                pass
+
+    raise ImportError("ERROR: fail to load the dynamic library.")
+
+_uc = load_unicorn()
 
 
 # setup all the function prototype
