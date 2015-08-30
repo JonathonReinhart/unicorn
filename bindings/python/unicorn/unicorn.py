@@ -116,7 +116,6 @@ class Uc(object):
         # verify version compatibility with the core before doing anything
         (major, minor, _combined) = uc_version()
         if major != UC_API_MAJOR or minor != UC_API_MINOR:
-            self._uch = None
             # our binding version is different from the core's API version
             raise UcError(UC_ERR_VERSION)
 
@@ -124,7 +123,6 @@ class Uc(object):
         self._uch = ctypes.c_size_t()
         status = _uc.uc_open(arch, mode, ctypes.byref(self._uch))
         if status != UC_ERR_OK:
-            self._uch = None
             raise UcError(status)
         # internal mapping table to save callback & userdata
         self._callbacks = {}
