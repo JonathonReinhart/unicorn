@@ -27,24 +27,29 @@ static int teardown(void **state)
 
 /******************************************************************************/
 
-struct bb {
+struct addrsize {
     uint64_t    addr;
     size_t      size;
 };
 
-struct bbtest {
-    const struct bb *blocks;
-    unsigned int     blocknum;
+struct testdata {
+    const struct addrsize  *items;
+    unsigned int            num;
 };
 
 
-static void test_basic_blocks_hook(uc_engine *uc, uint64_t address, uint32_t size, void *user_data)
+/* Used for tracing basic blocks or instructions */
+static void common_trace_hook(uc_engine *uc, uint64_t address, uint32_t size, void *user_data)
 {
-    struct bbtest *bbtest = user_data;
-    const struct bb *bb = &bbtest->blocks[bbtest->blocknum++];
+    struct testdata *td = user_data;
+    const struct addrsize *item = &td->items[td->num++];
 
-    assert_int_equal(address, bb->addr);
-    assert_int_equal((size_t)size, bb->size);
+    /**
+     * Assert that the n'th basic block / instruction is at the
+     * correct address and is the correct size.
+     */
+    assert_int_equal(address, item->addr);
+    assert_int_equal((size_t)size, item->size);
 }
 
 static void test_basic_blocks(void **state)
@@ -54,8 +59,8 @@ static void test_basic_blocks(void **state)
 
 #define BASEADDR    0x1000000
 
-    uint64_t address = BASEADDR;
-    const uint8_t code[] = {
+    static const uint64_t address = BASEADDR;
+    static const uint8_t code[] = {
         0x33, 0xC0,     // xor  eax, eax
         0x90,           // nop
         0x90,           // nop
@@ -65,16 +70,15 @@ static void test_basic_blocks(void **state)
         0x90,           // nop
     };
 
-    static const struct bb blocks[] = {
+    static const struct addrsize blocks[] = {
         {BASEADDR,      6},
         {BASEADDR+ 6,   3},
     };
 
-    struct bbtest bbtest = {
-        .blocks = blocks,
-        .blocknum = 0,
+    struct testdata testdata = {
+        .items = blocks,
+        .num = 0,
     };
-
 
 #undef BASEADDR
 
@@ -85,39 +89,59 @@ static void test_basic_blocks(void **state)
     OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // trace all basic blocks
-    OK(uc_hook_add(uc, &trace1, UC_HOOK_BLOCK, test_basic_blocks_hook, &bbtest, (uint64_t)1, (uint64_t)0));
+    OK(uc_hook_add(uc, &trace1, UC_HOOK_BLOCK, common_trace_hook, &testdata, (uint64_t)1, (uint64_t)0));
+
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
+}
+
+static void test_instr_trace(void **state)
+{
+    uc_engine *uc = *state;
+    uc_hook trace1;
+
+#define BASEADDR    0x1000000
+
+    static const uint64_t address = BASEADDR;
+    static const uint8_t code[] = {
+        0x33, 0xC0,     // 00:  xor  eax, eax
+        0x90,           // 02:  nop
+        0xEB, 0x00,     // 03:  jmp  $+2
+        0x90,           // 05:  nop
+    };
+
+    static const struct addrsize instrs[] = {
+        {BASEADDR,      2},
+        {BASEADDR + 2,  1},
+        {BASEADDR + 3,  2},
+        {BASEADDR + 5,  1},
+    };
+
+    struct testdata testdata = {
+        .items = instrs,
+        .num = 0,
+    };
+
+#undef BASEADDR
+
+    // map 2MB memory for this emulation
+    OK(uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL));
+
+    // write machine code to be emulated to memory
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
+
+    // trace all basic blocks
+    OK(uc_hook_add(uc, &trace1, UC_HOOK_CODE, common_trace_hook, &testdata, (uint64_t)1, (uint64_t)0));
 
     OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
 }
 
 /******************************************************************************/
 
-// callback for tracing basic blocks
-static void hook_block(uc_engine *uc, uint64_t address, uint32_t size, void *user_data)
-{
-    //printf(">>> Tracing basic block at 0x%"PRIx64 ", block size = 0x%x\n", address, size);
-}
-
-// callback for tracing instruction
-static void hook_code(uc_engine *uc, uint64_t address, uint32_t size, void *user_data)
-{
-    //int eflags;
-    //printf(">>> Tracing instruction at 0x%"PRIx64 ", instruction size = 0x%x\n", address, size);
-
-    //uc_reg_read(uc, UC_X86_REG_EFLAGS, &eflags);
-    //printf(">>> --- EFLAGS is 0x%x\n", eflags);
-
-    // Uncomment below code to stop the emulation using uc_emu_stop()
-    // if (address == 0x1000009)
-    //    uc_emu_stop(uc);
-}
-
 static void test_i386(void **state)
 {
     uc_engine *uc;
     uc_err err;
     uint32_t tmp;
-    uc_hook trace1, trace2;
 
     const uint8_t code[] = "\x41\x4a"; // INC ecx; DEC edx
     const uint64_t address = 0x1000000;
@@ -141,14 +165,6 @@ static void test_i386(void **state)
     err = uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx);
     uc_assert_success(err);
     err = uc_reg_write(uc, UC_X86_REG_EDX, &r_edx);
-    uc_assert_success(err);
-
-    // tracing all basic blocks with customized callback
-    err = uc_hook_add(uc, &trace1, UC_HOOK_BLOCK, hook_block, NULL, (uint64_t)1, (uint64_t)0);
-    uc_assert_success(err);
-
-    // tracing all instruction by having @begin > @end
-    err = uc_hook_add(uc, &trace2, UC_HOOK_CODE, hook_code, NULL, (uint64_t)1, (uint64_t)0);
     uc_assert_success(err);
 
     // emulate machine code in infinite time
@@ -176,7 +192,6 @@ static void test_i386_jump(void **state)
 {
     uc_engine *uc;
     uc_err err;
-    uc_hook trace1, trace2;
 
     const uint8_t code[] = "\xeb\x02\x90\x90\x90\x90\x90\x90"; // jmp 4; nop; nop; nop; nop; nop; nop
     const uint64_t address = 0x1000000;
@@ -191,14 +206,6 @@ static void test_i386_jump(void **state)
 
     // write machine code to be emulated to memory
     err = uc_mem_write(uc, address, code, sizeof(code)-1);
-    uc_assert_success(err);
-
-    // tracing 1 basic block with customized callback
-    err = uc_hook_add(uc, &trace1, UC_HOOK_BLOCK, hook_block, NULL, (uint64_t)address, (uint64_t)address);
-    uc_assert_success(err);
-
-    // tracing 1 instruction at address
-    err = uc_hook_add(uc, &trace2, UC_HOOK_CODE, hook_code, NULL, (uint64_t)address, (uint64_t)address);
     uc_assert_success(err);
 
     // emulate machine code in infinite time
@@ -268,7 +275,7 @@ static void test_i386_inout(void **state)
 {
     uc_engine *uc;
     uc_err err;
-    uc_hook trace1, trace2, trace3, trace4;
+    uc_hook trace1, trace2;
 
     int r_eax = 0x1234;     // EAX register
     int r_ecx = 0x6789;     // ECX register
@@ -301,20 +308,12 @@ static void test_i386_inout(void **state)
     err = uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx);
     uc_assert_success(err);
 
-    // tracing all basic blocks with customized callback
-    err = uc_hook_add(uc, &trace1, UC_HOOK_BLOCK, hook_block, NULL, (uint64_t)1, (uint64_t)0);
-    uc_assert_success(err);
-
-    // tracing all instructions
-    err = uc_hook_add(uc, &trace2, UC_HOOK_CODE, hook_code, NULL, (uint64_t)1, (uint64_t)0);
-    uc_assert_success(err);
-
     // uc IN instruction
-    err = uc_hook_add(uc, &trace3, UC_HOOK_INSN, hook_in, NULL, UC_X86_INS_IN);
+    err = uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_in, NULL, UC_X86_INS_IN);
     uc_assert_success(err);
 
     // uc OUT instruction
-    err = uc_hook_add(uc, &trace4, UC_HOOK_INSN, hook_out, NULL, UC_X86_INS_OUT);
+    err = uc_hook_add(uc, &trace2, UC_HOOK_INSN, hook_out, NULL, UC_X86_INS_OUT);
     uc_assert_success(err);
 
     // emulate machine code in infinite time
@@ -512,7 +511,7 @@ static void test_x86_64(void **state)
 {
     uc_engine *uc;
     uc_err err;
-    uc_hook trace1, trace2, trace3, trace4;
+    uc_hook trace2, trace3, trace4;
 
     static const uint64_t address = 0x1000000;
     static const uint8_t code[] = "\x41\xBC\x3B\xB0\x28\x2A\x49\x0F\xC9\x90\x4D\x0F\xAD\xCF\x49\x87\xFD\x90\x48\x81\xD2\x8A\xCE\x77\x35\x48\xF7\xD9\x4D\x29\xF4\x49\x81\xC9\xF6\x8A\xC6\x53\x4D\x87\xED\x48\x0F\xAD\xD2\x49\xF7\xD4\x48\xF7\xE1\x4D\x19\xC5\x4D\x89\xC5\x48\xF7\xD6\x41\xB8\x4F\x8D\x6B\x59\x4D\x87\xD0\x68\x6A\x1E\x09\x3C\x59";
@@ -564,10 +563,6 @@ static void test_x86_64(void **state)
     uc_assert_success(uc_reg_write(uc, UC_X86_REG_R13, &r13));
     uc_assert_success(uc_reg_write(uc, UC_X86_REG_R14, &r14));
     uc_assert_success(uc_reg_write(uc, UC_X86_REG_R15, &r15));
-
-    // tracing all basic blocks with customized callback
-    err = uc_hook_add(uc, &trace1, UC_HOOK_BLOCK, hook_block, NULL, (uint64_t)1, (uint64_t)0);
-    uc_assert_success(err);
 
     // tracing all instructions in the range [address, address+20]
     err = uc_hook_add(uc, &trace2, UC_HOOK_CODE, hook_code64, NULL, (uint64_t)address, (uint64_t)(address+20));
@@ -745,6 +740,7 @@ int main(void) {
         cmocka_unit_test(test_x86_16),
 
         cmocka_unit_test_setup_teardown(test_basic_blocks, setup32, teardown),
+        cmocka_unit_test_setup_teardown(test_instr_trace, setup32, teardown),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
