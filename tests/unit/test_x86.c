@@ -82,8 +82,8 @@ static void test_basic_blocks(void **state)
 
 #undef BASEADDR
 
-    // map 2MB memory for this emulation
-    OK(uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL));
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
     OK(uc_mem_write(uc, address, code, sizeof(code)));
@@ -123,8 +123,8 @@ static void test_instr_trace(void **state)
 
 #undef BASEADDR
 
-    // map 2MB memory for this emulation
-    OK(uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL));
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
     OK(uc_mem_write(uc, address, code, sizeof(code)));
@@ -191,80 +191,74 @@ static void test_emu_stop(void **state)
 static void test_i386(void **state)
 {
     uc_engine *uc;
-    uc_err err;
-    uint32_t tmp;
 
-    const uint8_t code[] = "\x41\x4a"; // INC ecx; DEC edx
-    const uint64_t address = 0x1000000;
+    static const uint8_t code[] = {
+        0x41,       // inc  ecx
+        0x4A,       // dec  edx
+    };
+    static const uint64_t address = 0x1000000;
 
     int r_ecx = 0x1234;     // ECX register
     int r_edx = 0x7890;     // EDX register
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code)-1);
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // initialize machine registers
-    err = uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx);
-    uc_assert_success(err);
-    err = uc_reg_write(uc, UC_X86_REG_EDX, &r_edx);
-    uc_assert_success(err);
+    OK(uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx));
+    OK(uc_reg_write(uc, UC_X86_REG_EDX, &r_edx));
 
     // emulate machine code in infinite time
-    err = uc_emu_start(uc, address, address+sizeof(code)-1, 0, 0);
-    uc_assert_success(err);
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
 
     // now print out some registers
     //printf(">>> Emulation done. Below is the CPU context\n");
 
-    uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx);
-    uc_reg_read(uc, UC_X86_REG_EDX, &r_edx);
+    OK(uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx));
+    OK(uc_reg_read(uc, UC_X86_REG_EDX, &r_edx));
 
     assert_int_equal(r_ecx, 0x1235);
     assert_int_equal(r_edx, 0x788F);
 
-    // read from memory
-    err = uc_mem_read(uc, address, (uint8_t *)&tmp, 4);
-    uc_assert_success(err);
-    //printf(">>> Read 4 bytes from [0x%"PRIX64"] = 0x%x\n", address, tmp);
-
-    uc_close(uc);
+    OK(uc_close(uc));
 }
 
 static void test_i386_jump(void **state)
 {
     uc_engine *uc;
-    uc_err err;
 
-    const uint8_t code[] = "\xeb\x02\x90\x90\x90\x90\x90\x90"; // jmp 4; nop; nop; nop; nop; nop; nop
-    const uint64_t address = 0x1000000;
+    static const uint8_t code[] = {
+        0x33, 0xC0,     // xor  eax, eax
+        0xEB, 0x01,     // jmp  $+3
+        0x40,           // inc  eax
+        0x40,           // inc  eax
+    };
+    static const uint64_t address = 0x1000000;
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code)-1);
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // emulate machine code in infinite time
-    err = uc_emu_start(uc, address, address+sizeof(code)-1, 0, 0);
-    uc_assert_success(err);
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
 
-    err = uc_close(uc);
-    uc_assert_success(err);
+    // Only one of the two INCs should have been executed
+    int32_t r_eax;
+    OK(uc_reg_read(uc, UC_X86_REG_EAX, &r_eax));
+    assert_int_equal(r_eax, 1);
+
+    OK(uc_close(uc));
 }
 
 /******************************************************************************/
@@ -325,7 +319,6 @@ static void hook_out(uc_engine *uc, uint32_t port, int size, uint32_t value, voi
 static void test_i386_inout(void **state)
 {
     uc_engine *uc;
-    uc_err err;
     uc_hook trace1, trace2;
 
     int r_eax = 0x1234;     // EAX register
@@ -342,42 +335,34 @@ static void test_i386_inout(void **state)
 
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // initialize machine registers
-    err = uc_reg_write(uc, UC_X86_REG_EAX, &r_eax);
-    uc_assert_success(err);
-    err = uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx);
-    uc_assert_success(err);
+    OK(uc_reg_write(uc, UC_X86_REG_EAX, &r_eax));
+    OK(uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx));
 
     // uc IN instruction
-    err = uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_in, NULL, UC_X86_INS_IN);
-    uc_assert_success(err);
+    OK(uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_in, NULL, UC_X86_INS_IN));
 
     // uc OUT instruction
-    err = uc_hook_add(uc, &trace2, UC_HOOK_INSN, hook_out, NULL, UC_X86_INS_OUT);
-    uc_assert_success(err);
+    OK(uc_hook_add(uc, &trace2, UC_HOOK_INSN, hook_out, NULL, UC_X86_INS_OUT));
 
     // emulate machine code in infinite time
-    err = uc_emu_start(uc, address, address+sizeof(code), 0, 0);
-    uc_assert_success(err);
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
 
-    uc_reg_read(uc, UC_X86_REG_EAX, &r_eax);
-    uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx);
+    OK(uc_reg_read(uc, UC_X86_REG_EAX, &r_eax));
+    OK(uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx));
     //printf(">>> EAX = 0x%x\n", r_eax);
     //printf(">>> ECX = 0x%x\n", r_ecx);
     // TODO: Assert on the register values here
 
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 /******************************************************************************/
@@ -386,7 +371,6 @@ static void test_i386_inout(void **state)
 static void test_i386_loop(void **state)
 {
     uc_engine *uc;
-    uc_err err;
 
     int r_ecx = 0x1234;     // ECX register
     int r_edx = 0x7890;     // EDX register
@@ -399,36 +383,29 @@ static void test_i386_loop(void **state)
     };
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // initialize machine registers
-    err = uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx);
-    uc_assert_success(err);
-    err = uc_reg_write(uc, UC_X86_REG_EDX, &r_edx);
-    uc_assert_success(err);
+    OK(uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx));
+    OK(uc_reg_write(uc, UC_X86_REG_EDX, &r_edx));
 
-    // emulate machine code in 2 seconds, so we can quit even
-    // if the code loops
-    err = uc_emu_start(uc, address, address+sizeof(code), 2*UC_SECOND_SCALE, 0);
-    uc_assert_success(err);
+    // emulate for a max of 1 second
+    OK(uc_emu_start(uc, address, address+sizeof(code), 1*UC_SECOND_SCALE, 0));
 
     // verify register values
-    uc_assert_success(uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx));
-    uc_assert_success(uc_reg_read(uc, UC_X86_REG_EDX, &r_edx));
+    OK(uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx));
+    OK(uc_reg_read(uc, UC_X86_REG_EDX, &r_edx));
 
     assert_int_equal(r_ecx, 0x1235);
     assert_int_equal(r_edx, 0x788F);
 
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 /******************************************************************************/
@@ -445,22 +422,19 @@ static void test_i386_invalid_mem_read(void **state)
     };
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // emulate machine code in infinite time
     err = uc_emu_start(uc, address, address+sizeof(code), 0, 0);
     uc_assert_err(UC_ERR_READ_UNMAPPED, err);
 
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 // emulate code that writes invalid memory
@@ -475,23 +449,19 @@ static void test_i386_invalid_mem_write(void **state)
     };
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // emulate machine code in infinite time
     err = uc_emu_start(uc, address, address+sizeof(code), 0, 0);
     uc_assert_err(UC_ERR_WRITE_UNMAPPED, err);
 
-
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 // emulate code that jumps to invalid memory
@@ -506,23 +476,19 @@ static void test_i386_jump_invalid(void **state)
     };
 
     // Initialize emulator in X86-32bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_32, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
 
-    // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // emulate machine code in infinite time
     err = uc_emu_start(uc, address, address+sizeof(code), 0, 0);
     uc_assert_err(UC_ERR_FETCH_UNMAPPED, err);
 
-
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 
@@ -561,7 +527,6 @@ static void hook_code64(uc_engine *uc, uint64_t address, uint32_t size, void *us
 static void test_x86_64(void **state)
 {
     uc_engine *uc;
-    uc_err err;
     uc_hook trace2, trace3, trace4;
 
     static const uint64_t address = 0x1000000;
@@ -586,67 +551,60 @@ static void test_x86_64(void **state)
 
 
     // Initialize emulator in X86-64bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_64, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_64, &uc));
 
     // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    OK(uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code) - 1);
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code) - 1));
 
     // initialize machine registers
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RSP, &rsp));
+    OK(uc_reg_write(uc, UC_X86_REG_RSP, &rsp));
 
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RAX, &rax));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RBX, &rbx));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RCX, &rcx));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RDX, &rdx));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RSI, &rsi));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RDI, &rdi));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R8,  &r8));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R9,  &r9));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R10, &r10));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R11, &r11));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R12, &r12));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R13, &r13));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R14, &r14));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_R15, &r15));
+    OK(uc_reg_write(uc, UC_X86_REG_RAX, &rax));
+    OK(uc_reg_write(uc, UC_X86_REG_RBX, &rbx));
+    OK(uc_reg_write(uc, UC_X86_REG_RCX, &rcx));
+    OK(uc_reg_write(uc, UC_X86_REG_RDX, &rdx));
+    OK(uc_reg_write(uc, UC_X86_REG_RSI, &rsi));
+    OK(uc_reg_write(uc, UC_X86_REG_RDI, &rdi));
+    OK(uc_reg_write(uc, UC_X86_REG_R8,  &r8));
+    OK(uc_reg_write(uc, UC_X86_REG_R9,  &r9));
+    OK(uc_reg_write(uc, UC_X86_REG_R10, &r10));
+    OK(uc_reg_write(uc, UC_X86_REG_R11, &r11));
+    OK(uc_reg_write(uc, UC_X86_REG_R12, &r12));
+    OK(uc_reg_write(uc, UC_X86_REG_R13, &r13));
+    OK(uc_reg_write(uc, UC_X86_REG_R14, &r14));
+    OK(uc_reg_write(uc, UC_X86_REG_R15, &r15));
 
     // tracing all instructions in the range [address, address+20]
-    err = uc_hook_add(uc, &trace2, UC_HOOK_CODE, hook_code64, NULL, (uint64_t)address, (uint64_t)(address+20));
-    uc_assert_success(err);
+    OK(uc_hook_add(uc, &trace2, UC_HOOK_CODE, hook_code64, NULL, (uint64_t)address, (uint64_t)(address+20)));
 
     // tracing all memory WRITE access (with @begin > @end)
-    err = uc_hook_add(uc, &trace3, UC_HOOK_MEM_WRITE, hook_mem64, NULL, (uint64_t)1, (uint64_t)0);
-    uc_assert_success(err);
+    OK(uc_hook_add(uc, &trace3, UC_HOOK_MEM_WRITE, hook_mem64, NULL, (uint64_t)1, (uint64_t)0));
 
     // tracing all memory READ access (with @begin > @end)
-    err = uc_hook_add(uc, &trace4, UC_HOOK_MEM_READ, hook_mem64, NULL, (uint64_t)1, (uint64_t)0);
-    uc_assert_success(err);
+    OK(uc_hook_add(uc, &trace4, UC_HOOK_MEM_READ, hook_mem64, NULL, (uint64_t)1, (uint64_t)0));
 
     // emulate machine code in infinite time (last param = 0), or when
     // finishing all the code.
-    err = uc_emu_start(uc, address, address+sizeof(code) - 1, 0, 0);
-    uc_assert_success(err);
+    OK(uc_emu_start(uc, address, address+sizeof(code) - 1, 0, 0));
 
     // Read registers
-    uc_reg_read(uc, UC_X86_REG_RAX, &rax);
-    uc_reg_read(uc, UC_X86_REG_RBX, &rbx);
-    uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
-    uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
-    uc_reg_read(uc, UC_X86_REG_RSI, &rsi);
-    uc_reg_read(uc, UC_X86_REG_RDI, &rdi);
-    uc_reg_read(uc, UC_X86_REG_R8,  &r8);
-    uc_reg_read(uc, UC_X86_REG_R9,  &r9);
-    uc_reg_read(uc, UC_X86_REG_R10, &r10);
-    uc_reg_read(uc, UC_X86_REG_R11, &r11);
-    uc_reg_read(uc, UC_X86_REG_R12, &r12);
-    uc_reg_read(uc, UC_X86_REG_R13, &r13);
-    uc_reg_read(uc, UC_X86_REG_R14, &r14);
-    uc_reg_read(uc, UC_X86_REG_R15, &r15);
+    OK(uc_reg_read(uc, UC_X86_REG_RAX, &rax));
+    OK(uc_reg_read(uc, UC_X86_REG_RBX, &rbx));
+    OK(uc_reg_read(uc, UC_X86_REG_RCX, &rcx));
+    OK(uc_reg_read(uc, UC_X86_REG_RDX, &rdx));
+    OK(uc_reg_read(uc, UC_X86_REG_RSI, &rsi));
+    OK(uc_reg_read(uc, UC_X86_REG_RDI, &rdi));
+    OK(uc_reg_read(uc, UC_X86_REG_R8,  &r8));
+    OK(uc_reg_read(uc, UC_X86_REG_R9,  &r9));
+    OK(uc_reg_read(uc, UC_X86_REG_R10, &r10));
+    OK(uc_reg_read(uc, UC_X86_REG_R11, &r11));
+    OK(uc_reg_read(uc, UC_X86_REG_R12, &r12));
+    OK(uc_reg_read(uc, UC_X86_REG_R13, &r13));
+    OK(uc_reg_read(uc, UC_X86_REG_R14, &r14));
+    OK(uc_reg_read(uc, UC_X86_REG_R15, &r15));
 
 #if 0
     printf(">>> RAX = 0x%" PRIx64 "\n", rax);
@@ -665,7 +623,7 @@ static void test_x86_64(void **state)
     printf(">>> R15 = 0x%" PRIx64 "\n", r15);
 #endif
 
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 /******************************************************************************/
@@ -675,18 +633,17 @@ static void hook_syscall(uc_engine *uc, void *user_data)
 {
     uint64_t rax;
 
-    uc_assert_success(uc_reg_read(uc, UC_X86_REG_RAX, &rax));
+    OK(uc_reg_read(uc, UC_X86_REG_RAX, &rax));
     assert_int_equal(0x100, rax);
 
     rax = 0x200;
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_RAX, &rax));
+    OK(uc_reg_write(uc, UC_X86_REG_RAX, &rax));
 }
 
 static void test_x86_64_syscall(void **state)
 {
     uc_engine *uc;
     uc_hook trace1;
-    uc_err err;
 
     static const uint64_t address = 0x1000000;
     static const uint8_t code[] = {
@@ -696,35 +653,29 @@ static void test_x86_64_syscall(void **state)
     int64_t rax = 0x100;
 
     // Initialize emulator in X86-64bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_64, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_64, &uc));
 
     // map 2MB memory for this emulation
-    err = uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    OK(uc_mem_map(uc, address, 2 * 1024 * 1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // hook interrupts for syscall
-    err = uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_syscall, NULL, UC_X86_INS_SYSCALL);
-    uc_assert_success(err);
+    OK(uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_syscall, NULL, UC_X86_INS_SYSCALL));
 
     // initialize machine registers
-    err = uc_reg_write(uc, UC_X86_REG_RAX, &rax);
-    uc_assert_success(err);
+    OK(uc_reg_write(uc, UC_X86_REG_RAX, &rax));
 
     // emulate machine code in infinite time (last param = 0), or when
     // finishing all the code.
-    err = uc_emu_start(uc, address, address + sizeof(code), 0, 0);
-    uc_assert_success(err);
+    OK(uc_emu_start(uc, address, address + sizeof(code), 0, 0));
 
     // verify register values
-    uc_assert_success(uc_reg_read(uc, UC_X86_REG_RAX, &rax));
+    OK(uc_reg_read(uc, UC_X86_REG_RAX, &rax));
     assert_int_equal(0x200, rax);
 
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 /******************************************************************************/
@@ -732,7 +683,6 @@ static void test_x86_64_syscall(void **state)
 static void test_x86_16(void **state)
 {
     uc_engine *uc;
-    uc_err err;
     uint8_t tmp;
 
     static const uint64_t address = 0;
@@ -745,37 +695,34 @@ static void test_x86_16(void **state)
     int32_t esi = 6;
 
     // Initialize emulator in X86-16bit mode
-    err = uc_open(UC_ARCH_X86, UC_MODE_16, &uc);
-    uc_assert_success(err);
+    OK(uc_open(UC_ARCH_X86, UC_MODE_16, &uc));
 
     // map 8KB memory for this emulation
-    err = uc_mem_map(uc, address, 8 * 1024, UC_PROT_ALL);
-    uc_assert_success(err);
+    OK(uc_mem_map(uc, address, 8 * 1024, UC_PROT_ALL));
 
     // write machine code to be emulated to memory
-    err = uc_mem_write(uc, address, code, sizeof(code));
-    uc_assert_success(err);
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
 
     // initialize machine registers
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_EAX, &eax));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_EBX, &ebx));
-    uc_assert_success(uc_reg_write(uc, UC_X86_REG_ESI, &esi));
+    OK(uc_reg_write(uc, UC_X86_REG_EAX, &eax));
+    OK(uc_reg_write(uc, UC_X86_REG_EBX, &ebx));
+    OK(uc_reg_write(uc, UC_X86_REG_ESI, &esi));
 
     // emulate machine code in infinite time (last param = 0), or when
     // finishing all the code.
-    err = uc_emu_start(uc, address, address+sizeof(code), 0, 0);
-    uc_assert_success(err);
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
 
     // read from memory
-    uc_assert_success(uc_mem_read(uc, 11, &tmp, 1));
+    OK(uc_mem_read(uc, 11, &tmp, 1));
     assert_int_equal(7, tmp);
 
-    uc_assert_success(uc_close(uc));
+    OK(uc_close(uc));
 }
 
 /******************************************************************************/
 
-int main(void) {
+int main(void)
+{
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_i386),
         cmocka_unit_test(test_i386_jump),
