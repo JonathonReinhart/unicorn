@@ -129,10 +129,61 @@ static void test_instr_trace(void **state)
     // write machine code to be emulated to memory
     OK(uc_mem_write(uc, address, code, sizeof(code)));
 
-    // trace all basic blocks
+    // trace each instruction
     OK(uc_hook_add(uc, &trace1, UC_HOOK_CODE, common_trace_hook, &testdata, (uint64_t)1, (uint64_t)0));
 
     OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
+}
+
+/******************************************************************************/
+
+static void test_emu_stop_cb(uc_engine *uc, uint64_t address, uint32_t size, void *user_data)
+{
+    uint64_t *stop_addr = user_data;
+
+    //fprintf(stderr, ">>> address=0x%"PRIX64" size=%u\n", address, size);
+
+    if (*stop_addr == address) {
+        //fprintf(stderr, "  calling uc_emu_stop\n");
+        OK(uc_emu_stop(uc));
+    }
+}
+
+/* Verify emu_stop() works (from a callback) */
+static void test_emu_stop(void **state)
+{
+    uc_engine *uc = *state;
+    uc_hook trace1;
+
+#define BASEADDR    0x1000000
+
+    static const uint64_t address = BASEADDR;
+    static const uint8_t code[] = {
+        0x33, 0xC0,     // 00:  xor  eax, eax   0
+        0x40,           // 02:  inc  eax        1
+        0x40,           // 03:  inc  eax        2
+        0x40,           // 04:  inc  eax        3
+        0x40,           // 05:  inc  eax        4
+    };
+
+    /**
+     * We want to stop after the first INC.
+     */
+    uint64_t stop_addr = BASEADDR + 2;
+#undef BASEADDR
+    
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
+
+    // trace each instruction
+    OK(uc_hook_add(uc, &trace1, UC_HOOK_CODE, test_emu_stop_cb, &stop_addr, (uint64_t)1, (uint64_t)0));
+
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
+
+    // Ensure EAX == 1, meaning the emulator didn't get to the last instruction
+    int64_t r_eax;
+    OK(uc_reg_read(uc, UC_X86_REG_EAX, &r_eax));
+    assert_int_equal(r_eax, 1);
 }
 
 /******************************************************************************/
@@ -741,6 +792,7 @@ int main(void) {
 
         cmocka_unit_test_setup_teardown(test_basic_blocks, setup32, teardown),
         cmocka_unit_test_setup_teardown(test_instr_trace, setup32, teardown),
+        cmocka_unit_test_setup_teardown(test_emu_stop, setup32, teardown),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
