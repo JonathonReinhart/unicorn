@@ -268,71 +268,27 @@ static void test_i386_jump(void **state)
 static uint32_t hook_in(uc_engine *uc, uint32_t port, int size, void *user_data)
 {
     uint32_t eip;
-
     uc_reg_read(uc, UC_X86_REG_EIP, &eip);
 
-    //printf("--- reading from port 0x%x, size: %u, address: 0x%x\n", port, size, eip);
+    assert_int_equal(0x44, port);
+    assert_int_equal(4, size);
 
-    switch(size) {
-        default:
-            return 0;   // should never reach this
-        case 1:
-            // read 1 byte to AL
-            return 0xf1;
-        case 2:
-            // read 2 byte to AX
-            return 0xf2;
-        case 4:
-            // read 4 byte to EAX
-            return 0xf4;
-    }
+    return 0x96857463;
 }
 
-// callback for OUT instruction (X86).
-static void hook_out(uc_engine *uc, uint32_t port, int size, uint32_t value, void *user_data)
-{
-    uint32_t tmp;
-    uint32_t eip;
-
-    uc_reg_read(uc, UC_X86_REG_EIP, &eip);
-
-    //printf("--- writing to port 0x%x, size: %u, value: 0x%x, address: 0x%x\n", port, size, value, eip);
-
-    // TODO: confirm that value is indeed the value of AL/AX/EAX
-    switch(size) {
-        default:
-            return;   // should never reach this
-        case 1:
-            uc_reg_read(uc, UC_X86_REG_AL, &tmp);
-            break;
-        case 2:
-            uc_reg_read(uc, UC_X86_REG_AX, &tmp);
-            break;
-        case 4:
-            uc_reg_read(uc, UC_X86_REG_EAX, &tmp);
-            break;
-    }
-
-    //printf("--- register value = 0x%x\n", tmp);
-}
-
-static void test_i386_inout(void **state)
+static void test_i386_in(void **state)
 {
     uc_engine *uc;
-    uc_hook trace1, trace2;
+    uc_hook trace1;
 
-    int r_eax = 0x1234;     // EAX register
-    int r_ecx = 0x6789;     // ECX register
+    uint32_t r_eax = 0xCCCCCCCC;
+    uint32_t r_ecx = 0;
 
     static const uint64_t address = 0x1000000;
     static const uint8_t code[] = {
-        0x41,           // inc  ecx
-        0xE4, 0x3F,     // in   al, 0x3F
-        0x4A,           // dec  edx
-        0xE6, 0x46,     // out  0x46, al
-        0x43,           // inc  ebx
+        0xE5,0x44,                  // in  eax, 0x44
+        0x41,                       // inc ecx
     };
-
 
     // Initialize emulator in X86-32bit mode
     OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
@@ -350,17 +306,65 @@ static void test_i386_inout(void **state)
     // uc IN instruction
     OK(uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_in, NULL, UC_X86_INS_IN));
 
-    // uc OUT instruction
-    OK(uc_hook_add(uc, &trace2, UC_HOOK_INSN, hook_out, NULL, UC_X86_INS_OUT));
-
     // emulate machine code in infinite time
     OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
 
     OK(uc_reg_read(uc, UC_X86_REG_EAX, &r_eax));
+    assert_int_equal(r_eax, 0x96857463);
+
     OK(uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx));
-    //printf(">>> EAX = 0x%x\n", r_eax);
-    //printf(">>> ECX = 0x%x\n", r_ecx);
-    // TODO: Assert on the register values here
+    assert_int_equal(r_ecx, 1);
+
+    OK(uc_close(uc));
+}
+
+/******************************************************************************/
+
+// callback for OUT instruction (X86).
+static void hook_out(uc_engine *uc, uint32_t port, int size, uint32_t value, void *user_data)
+{
+    uint32_t eip;
+    uc_reg_read(uc, UC_X86_REG_EIP, &eip);
+
+    assert_int_equal(0x88, port);
+    assert_int_equal(4, size);
+    assert_int_equal(0x74635241, value);
+}
+
+static void test_i386_out(void **state)
+{
+    uc_engine *uc;
+    uc_hook trace1;
+
+    uint32_t r_ecx = 0;
+
+    static const uint64_t address = 0x1000000;
+    static const uint8_t code[] = {
+        0xB8,0x41,0x52,0x63,0x74,   // mov eax, 0x74635241
+        0xE7,0x88,                  // out 0x88,eax
+        0x41,                       // inc ecx
+    };
+
+    // Initialize emulator in X86-32bit mode
+    OK(uc_open(UC_ARCH_X86, UC_MODE_32, &uc));
+
+    // map 4 KiB memory for this emulation
+    OK(uc_mem_map(uc, address, 4*1024, UC_PROT_ALL));
+
+    // write machine code to be emulated to memory
+    OK(uc_mem_write(uc, address, code, sizeof(code)));
+
+    // initialize machine registers
+    OK(uc_reg_write(uc, UC_X86_REG_ECX, &r_ecx));
+
+    // uc OUT instruction
+    OK(uc_hook_add(uc, &trace1, UC_HOOK_INSN, hook_out, NULL, UC_X86_INS_OUT));
+
+    // emulate machine code in infinite time
+    OK(uc_emu_start(uc, address, address+sizeof(code), 0, 0));
+
+    OK(uc_reg_read(uc, UC_X86_REG_ECX, &r_ecx));
+    assert_int_equal(r_ecx, 1);
 
     OK(uc_close(uc));
 }
@@ -726,7 +730,8 @@ int main(void)
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_i386),
         cmocka_unit_test(test_i386_jump),
-        cmocka_unit_test(test_i386_inout),
+        cmocka_unit_test(test_i386_in),
+        cmocka_unit_test(test_i386_out),
         cmocka_unit_test(test_i386_loop),
         cmocka_unit_test(test_i386_invalid_mem_read),
         cmocka_unit_test(test_i386_invalid_mem_write),
