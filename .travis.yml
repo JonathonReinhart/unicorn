@@ -6,7 +6,7 @@ before_install:
         - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install glib; fi
 
 script:
-        - ./make.sh
+        - ./make.sh test
 compiler:
         - clang
         - gcc
