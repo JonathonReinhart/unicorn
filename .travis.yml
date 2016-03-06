@@ -1,19 +1,16 @@
-language: c
-sudo: false
-addons:
-    apt:
-        packages:
-            - libcmocka0
-            - libcmocka-dev
-before_install:
-        - export LD_LIBRARY_PATH=`pwd`/samples/:$LD_LIBRARY_PATH
-        - ./ci/install_deps.sh
-
-script:
-        - ./make.sh test
-compiler:
-        - clang
-        - gcc
+sudo: required
+dist: trusty
 os:
         - linux
         - osx
+compiler:
+        - clang
+        - gcc
+language: c
+
+before_install:
+        - export LD_LIBRARY_PATH=`pwd`/samples/:$LD_LIBRARY_PATH
+        - sudo ./ci/install_deps.sh
+
+script:
+        - ./make.sh test

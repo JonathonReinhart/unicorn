@@ -2,10 +2,10 @@
 # Install dependencies for Travis CI builds
 
 install_for_linux() {
-    # Since we're using the container-based infrastructure
-    # (sudo: false), we instead specify APT packages in .travis.yml,
-    # under addons.apt.packages
-    return
+    apt-get update
+    apt-get install \
+        libcmocka0 \
+        libcmocka-dev
 }
 
 install_for_osx() {
