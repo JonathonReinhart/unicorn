@@ -34,6 +34,11 @@ build() {
   ${MAKE}
 }
 
+do_test() {
+  [ "$UNAME" = Darwin ] && LIBARCHS="i386 x86_64"
+  ${MAKE} test
+}
+
 build_cross() {
   [ "$UNAME" = Darwin ] && LIBARCHS="i386 x86_64"
   CROSS=$1
@@ -93,6 +98,7 @@ case "$1" in
   "default" ) build;;
   "install" ) install;;
   "uninstall" ) uninstall;;
+  "test" ) do_test;;
   "cross-win32" ) build_cross i686-w64-mingw32;;
   "cross-win64" ) build_cross x86_64-w64-mingw32;;
   "cross-android" ) CROSS=arm-linux-androideabi build;;
