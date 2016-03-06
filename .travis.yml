@@ -2,8 +2,7 @@ language: c
 sudo: false
 before_install:
         - export LD_LIBRARY_PATH=`pwd`/samples/:$LD_LIBRARY_PATH
-        - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew update; fi
-        - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install glib; fi
+        - ./ci/install_deps.sh
 
 script:
         - ./make.sh test
